@@ -32,7 +32,7 @@ def process_text(text):
 
 
 # using Dict to store the forward index data bcz dicts behave as hashmaps in python
-forward_idx = {}
+forward_idx = []
 
 for idx, row in test_csv.iterrows():
     # Building the combined text by using only relevant fields from the dataset. 
@@ -48,15 +48,20 @@ for idx, row in test_csv.iterrows():
     
     total_tokens = 0
     for token in tokens:
-            word_id = lexicon[token]
-            word_data[word_id] = word_data.get(word_id, 0) + 1
+            word_id = lexicon[token] # get the word_id from the lexicon for the word/token. 
+            word_data[word_id] = word_data.get(word_id, 0) + 1 # increment the frequency 0th value of tuple of the word in the doc.
             total_tokens += 1
     
     for word_id in word_data:
         freq = word_data[word_id]
         density = freq / total_tokens if total_tokens > 0 else 0
-        word_data[word_id] = (freq, density)
+        word_data[word_id] = (freq, density) # store the frequency and density of the word in the doc against that word_id... 
     
+    
+    
+    # to maintain order we have to use list of dicts instead of dict of dicts... 
+    
+    #todos ... imporve the csv design .. to dict of dict while maintaining order.. 
     forward_idx.append({
         'doc_id': doc_id,
         'word_data': word_data
