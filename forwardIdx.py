@@ -1,47 +1,67 @@
-import pandas as pd 
-import nltk 
+import pandas as pd
+import nltk
 from nltk.corpus import stopwords
 from nltk.tokenize import word_tokenize
-
+from nltk.stem import WordNetLemmatizer
 import string
 
 nltk.download('stopwords')
 nltk.download('punkt')
-nltk.download('punkt_tab')
+nltk.download('wordnet')
+
+lemmatizer = WordNetLemmatizer()
+
 test_csv = pd.read_csv('test.csv')
-lexicon = pd.read_csv('lexicon.csv')
-lexicon = dict(zip(lexicon['word_id'], lexicon['word']))
+lexicon_df = pd.read_csv('lexicon.csv')
+
+# first converting file csv data to dict --> Hashmap... 
+lexicon = dict(zip(lexicon_df['word'], lexicon_df['word_id']))
+
+
 
 def process_text(text):
-    # remove punctuation 
+    # stopwords removal for optimizing tokenizations. 
     stop_words = set(stopwords.words('english'))
     tokens = word_tokenize(text.lower())
-    processed_token = [
-        word for word in tokens
-        if word not in stop_words
+    processed_tokens = [
+        # lemmatize the word to its base form for improving search results
+        lemmatizer.lemmatize(word) for word in tokens
+        if word not in stop_words and word not in string.punctuation
     ]
-    return processed_token
+    return processed_tokens
 
+
+# using Dict to store the forward index data bcz dicts behave as hashmaps in python
 forward_idx = {}
 
+for idx, row in test_csv.iterrows():
+    # Building the combined text by using only relevant fields from the dataset. 
+    combined_text = f"{row['Name']} {row['Description']} {row['URL']} {row['Language']} {row['Topics']}"
+    # use the above process_text function to obtain the tokens in each row in thier base form. 
+    tokens = process_text(combined_text) 
+    
+    doc_id = idx #Using the index of each doc in dataset as doc_id ... 
+    
+    # now against each doc_id .. we will store the tuples containg the word_id, frequency, density of that word in doc..
+    word_data = {} 
+    #word_data contains data of the words occuring in the document. 
+    
+    total_tokens = 0
+    for token in tokens:
+            word_id = lexicon[token]
+            word_data[word_id] = word_data.get(word_id, 0) + 1
+            total_tokens += 1
+    
+    for word_id in word_data:
+        freq = word_data[word_id]
+        density = freq / total_tokens if total_tokens > 0 else 0
+        word_data[word_id] = (freq, density)
+    
+    forward_idx.append({
+        'doc_id': doc_id,
+        'word_data': word_data
+    })
 
-for doc_id , row in test_csv.iterrows():
-   combined_text = f"{row['Name']} {row['Description']} {row['URL']} {row['Language']}, {row['Topics']}"
-#    print(combined_text)
-   tokens = process_text(combined_text)
-   word_ids = []
-   print(process_text(combined_text))
-   for token in tokens: 
-       # find the word id from lexicon and add it to word_ids
-       for word, word_id in lexicon.items(): 
-        #    print(word_id, word)
-           if token.lower() == word.lower():
-               word_ids.append(word_id)
-               break   
-   forward_idx[doc_id] = word_ids
-   
-   f_df = pd.DataFrame(list(forward_idx.items()), columns=['doc_id', 'word_ids'])
-
-# Save to CSV
+f_df = pd.DataFrame(forward_idx)
 f_df.to_csv('fwdIdx.csv', index=False)
-print("forwerd Idx saved to 'forwardIdx.csv'")
+print("Forward index saved to 'fwdIdx.csv'")
