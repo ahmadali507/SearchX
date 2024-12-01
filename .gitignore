@@ -81,6 +81,7 @@ ENV.bak/
 *.sqlite3
 *.db
 *.csv
+*.json
 
 # Test results
 coverage/
