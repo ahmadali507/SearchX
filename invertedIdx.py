@@ -3,7 +3,7 @@ import nltk
 from nltk.tokenize import word_tokenize
 from nltk.corpus import stopwords
 from nltk.stem import WordNetLemmatizer
-
+import json
 nltk.download('punkt')
 nltk.download('stopwords')
 nltk.download('wordnet')
@@ -11,18 +11,19 @@ nltk.download('wordnet')
 lemmatizer = WordNetLemmatizer()
 
 test_csv = pd.read_csv('test.csv')
-fwdIdx_csv = pd.read_csv('fwdIdx.csv')
+# fwdIdx_csv = pd.read_csv('fwdIdx.csv')
 lexicon_csv = pd.read_csv('lexicon.csv')
-
+with open('fwdIdx.json', 'r') as f:
+    forward_idx = json.load(f)
 # for efficent lookups converting the data from csv in list format to dict .. for efficent hashmap lookups... 
-lexicon = dict(zip(lexicon_csv['token'], lexicon_csv['id']))
-fwdIdx = dict(zip(fwdIdx_csv['doc_id'], fwdIdx_csv['word_data']))
+lexicon = dict(zip(lexicon_csv['word_id'], lexicon_csv['word']))
+# fwdIdx = dict(zip(fwdIdx_csv['doc_id'], fwdIdx_csv['word_data']))
 
 
 inverted_idx = {}
 # list to store the doc_ids containing that word and the frequency of the word in that doc with density. 
 
-for doc_id, word_data in fwdIdx.items(): 
+for doc_id, word_data in forward_idx.items(): 
     # doc_id is the key and word_data is the value in the forward index.
     # here we want the word_id to be key and the doc_data to be the values ... 
     
@@ -37,15 +38,8 @@ for doc_id, word_data in fwdIdx.items():
             inverted_idx[word_id][doc_id] = {
                 'freq': freq,
                 'density': density, 
-                'URL' : test_csv.iloc[doc_id]['URL'],
-                'stars' : test_csv.iloc[doc_id]['Stars'],
-                'forks' : test_csv.iloc[doc_id]['Forks']
                 # added stars and forks with doc_id to rank the results based on stars and forks for popularity of the repo
             }
-print("Optimized Inverted Index:")
-for word_id, doc_data in inverted_idx.items():
-    print(f"Word ID {word_id}: {doc_data}")
-        
-
-
-
+with open('invertedIdx.json', 'w') as f:
+    json.dump(inverted_idx, f, indent=4)
+print("Optimized inverted index saved to 'invertedIdx.json'")

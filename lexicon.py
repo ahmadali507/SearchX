@@ -38,6 +38,6 @@ for index, row in test_csv.iterrows():
             curr_id += 1
 
 lexicon_df = pd.DataFrame(list(lexicon.items()), columns=['id', 'token'])
-
+# potential chances of converting to a json based on requirements and efficiency... 
 lexicon_df.to_csv('lexicon.csv', index=False)
 print("Lexicon saved to 'lexicon.csv'")
