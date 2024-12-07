@@ -4,6 +4,7 @@ from nltk.tokenize import word_tokenize
 from nltk.corpus import stopwords
 from nltk.stem import WordNetLemmatizer
 import string
+import json 
 
 # Download necessary NLTK data
 nltk.download('punkt')
@@ -12,8 +13,7 @@ nltk.download('wordnet')
 nltk.download('omw-1.4')
 
 # Load the test_data file
-test_csv = pd.read_csv('repositories.csv')
-
+test_csv = pd.read_csv('test.csv')
 lemmatizer = WordNetLemmatizer()
 
 def process_text(text):
@@ -36,8 +36,13 @@ for index, row in test_csv.iterrows():
         if lemmatized_token not in lexicon.values():
             lexicon[curr_id] = lemmatized_token
             curr_id += 1
+            
+            
+with open('lexicon.json', 'w') as f:
+    json.dump(lexicon, f, indent=4)
+print("Optimized lexiocn saved to 'lexicon.json'")
 
-lexicon_df = pd.DataFrame(list(lexicon.items()), columns=['id', 'token'])
-# potential chances of converting to a json based on requirements and efficiency... 
-lexicon_df.to_csv('lexicon.csv', index=False)
-print("Lexicon saved to 'lexicon.csv'")
+# lexicon_df = pd.DataFrame(list(lexicon.items()), columns=['id', 'token'])
+# # potential chances of converting to a json based on requirements and efficiency... 
+# lexicon_df.to_csv('lexicon.csv', index=False)
+# print("Lexicon saved to 'lexicon.csv'")
