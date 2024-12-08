@@ -11,12 +11,13 @@ nltk.download('wordnet')
 lemmatizer = WordNetLemmatizer()
 
 test_csv = pd.read_csv('test.csv')
+test_csv = test_csv.set_index(test_csv.index).to_dict(orient='index')
 # fwdIdx_csv = pd.read_csv('fwdIdx.csv')
-lexicon_csv = pd.read_csv('lexicon.csv')
 with open('fwdIdx.json', 'r') as f:
     forward_idx = json.load(f)
+with open('lexicon.json', 'r') as f:
+    lexicon = json.load(f)
 # for efficent lookups converting the data from csv in list format to dict .. for efficent hashmap lookups... 
-lexicon = dict(zip(lexicon_csv['word_id'], lexicon_csv['word']))
 # fwdIdx = dict(zip(fwdIdx_csv['doc_id'], fwdIdx_csv['word_data']))
 
 
@@ -38,6 +39,12 @@ for doc_id, word_data in forward_idx.items():
             inverted_idx[word_id][doc_id] = {
                 'freq': freq,
                 'density': density, 
+                'stars' : test_csv[int(doc_id)]['Stars'], 
+                'forks' : test_csv[int(doc_id)]['Forks'],
+                'URL' : test_csv[int(doc_id)]['URL'], # URL is important bcz we need to fetch it for efficient search results..
+                'Has_downloads' : test_csv[int(doc_id)]['Has Downloads'],
+                'Issues' : test_csv[int(doc_id)]['Issues'],
+                
                 # added stars and forks with doc_id to rank the results based on stars and forks for popularity of the repo
             }
 with open('invertedIdx.json', 'w') as f:
