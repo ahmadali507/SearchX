@@ -5,6 +5,7 @@ from nltk.corpus import stopwords
 from nltk.stem import WordNetLemmatizer
 import string
 import json
+import json
 
 # Download necessary NLTK data
 nltk.download('punkt')
@@ -14,8 +15,10 @@ nltk.download('omw-1.4')
 
 # Load the test_data file
 test_csv = pd.read_csv('test.csv')
+test_csv = pd.read_csv('test.csv')
 lemmatizer = WordNetLemmatizer()
 
+# Function to preprocess text
 # Function to preprocess text
 def process_text(text):
     stop_words = set(stopwords.words('english'))
@@ -27,18 +30,26 @@ def process_text(text):
     return processed_tokens
 
 # Initialize lexicon dictionary
+# Initialize lexicon dictionary
 lexicon = {}
 curr_id = 1
 
 # Iterate through rows to build lexicon
+
+# Iterate through rows to build lexicon
 for index, row in test_csv.iterrows():
+    # Combine text fields for tokenization
     # Combine text fields for tokenization
     combined_text = f"{row.get('Name', '')} {row.get('Description', '')} {row.get('URL', '')} {row.get('Language', '')} {row.get('Topics', '')}"
     
     # Process the combined text
+    # Process the combined text
     tokens = process_text(combined_text)
     for token in tokens:
         lemmatized_token = lemmatizer.lemmatize(token)
+        # Add the word as key and assign a unique ID if not already present
+        if lemmatized_token not in lexicon:
+            lexicon[lemmatized_token] = curr_id
         # Add the word as key and assign a unique ID if not already present
         if lemmatized_token not in lexicon:
             lexicon[lemmatized_token] = curr_id
