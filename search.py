@@ -88,3 +88,4 @@ search_results = search(query)
 for result in search_results:
     print(f"Name: {result['Name']}, Description: {result['Description']}, Stars: {result['stars']}, Forks: {result['forks']}, URL: {result['url']}, Languages: {result['Languages']}, Topics: {result['Topics']}")
     print('\n')
+    
