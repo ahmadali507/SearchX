@@ -9,7 +9,7 @@ const poppins = Poppins({
 })
 
 export const metadata: Metadata = {
-  title: 'GitHub Repo Explorer - SearchX - SearchX',
+  title: 'SearchX',
   description: 'Discover and explore GitHub repositories with ease',
 }
 
