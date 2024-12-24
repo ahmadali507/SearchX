@@ -1,63 +1,115 @@
+import math
+import json
+import ast
+import string
+from collections import defaultdict
 import pandas as pd
 import nltk
 from nltk.corpus import stopwords
 from nltk.tokenize import word_tokenize
 from nltk.stem import WordNetLemmatizer
-import string
-import json
 
 nltk.download('stopwords')
 nltk.download('punkt')
-nltk.download('wordnet')
 
 lemmatizer = WordNetLemmatizer()
 
-test_csv = pd.read_csv('test.csv')
-lexicon_df = pd.read_csv('lexicon.csv')
+# Load the lexicon
+with open('lexicon.json', 'r') as f:
+    lexicon = json.load(f)
 
-# first converting file csv data to dict --> Hashmap... 
-lexicon = dict(zip(lexicon_df['word'], lexicon_df['word_id']))
+# Function to process text (tokenize and get word positions)
 def process_text(text):
-    # stopwords removal for optimizing tokenizations. 
     stop_words = set(stopwords.words('english'))
+    punctuation_set = set(string.punctuation)
     tokens = word_tokenize(text.lower())
-    processed_tokens = [
-        # lemmatize the word to its base form for improving search results
-        lemmatizer.lemmatize(word) for word in tokens
-        if word not in stop_words and word not in string.punctuation
-    ]
-    return processed_tokens
+    word_positions = defaultdict(list)
 
-# using Dict to store the forward index data bcz dicts behave as hashmaps in python
-forward_idx = {}
-for idx, row in test_csv.iterrows():
-    # Building the combined text by using only relevant fields from the dataset. 
-    combined_text = f"{row['Name']} {row['Description']} {row['URL']} {row['Language']} {row['Topics']}"
-    # use the above process_text function to obtain the tokens in each row in thier base form. 
-    tokens = process_text(combined_text) 
-    doc_id = idx #Using the index of each doc in dataset as doc_id ... 
-    # now against each doc_id .. we will store the tuples containg the word_id, frequency, density of that word in doc..
-    word_data = {} 
-    #word_data contains data of the words occuring in the document. 
-    total_tokens = 0
-    for token in tokens:
-            word_id = lexicon[token] # get the word_id from the lexicon for the word/token. 
-            word_data[word_id] = word_data.get(word_id, 0) + 1 # increment the frequency 0th value of tuple of the word in the doc.
-            total_tokens += 1
-    for word_id in word_data:
-        freq = word_data[word_id]
-        density = freq / total_tokens if total_tokens > 0 else 0
-        word_data[word_id] = (freq, density) # store the frequency and density of the word in the doc against that word_id... 
-    # to maintain order we have to use list of dicts instead of dict of dicts... 
-    #todos ... imporve the csv design .. to dict of dict while maintaining order.. 
-    forward_idx[doc_id] = word_data
-    
-    
-    
-with open('fwdIdx.json', 'w') as f:
-    json.dump(forward_idx, f, indent=4)
-print("Forward index saved to 'fwdIdx.json'")
+    processed_tokens = []
+    domain_suffixes = [".com", ".org", ".dev", ".gov", ".io", ".edu", ".net"]
 
-# f_df = pd.DataFrame(forward_idx)
-# f_df.to_csv('fwdIdx.csv', index=False)
-# print("Forward index saved to 'fwdIdx.csv'")
+    for position, token in enumerate(tokens):
+        token = token.replace("'", "")
+        if token.startswith(("http", "www", "//")):
+            continue
+        if token.endswith("'s"):
+            token = token[:-2]
+        for suffix in domain_suffixes:
+            if token.endswith(suffix):
+                token = token[:-len(suffix)]
+                break
+        if not token.isascii():
+            continue
+        token = token.lstrip('/')
+        if '-' in token:
+            sub_tokens = token.split('-')
+            for sub_token in sub_tokens:
+                if sub_token not in stop_words and sub_token not in punctuation_set:
+                    processed_tokens.append(sub_token)
+        else:
+            if token not in stop_words and token not in punctuation_set and len(token) > 1:
+                processed_tokens.append(token)
+                word_positions[token].append(position)  # Record the position of the token
+    return processed_tokens, word_positions
+
+# Open the output file for writing incrementally
+with open('fwdIdx.json', 'w') as output_file:
+    output_file.write("{\n")  # Start JSON object
+
+    cumulative_byte_offset = 213  # Initial byte offset, unchanged
+    first_doc = True  # Handle commas between entries
+
+    # Load the test CSV for processing
+    test_csv = pd.read_csv('repositories.csv')
+    with open('repositories.csv', 'r', encoding='utf-8') as f:
+        file_content = f.readlines()
+
+        # Process each row in the test CSV
+        for idx, row in test_csv.iterrows():
+            topics_list = ast.literal_eval(row['Topics'])
+            processed_list = ["".join(topic.split()) for topic in topics_list]
+            topic = " ".join(processed_list)
+            combined_text = f"{row['Name']} {row['Description']} {row['URL']} {row['Language']} {topic}"
+
+            # Calculate byte offset and row length
+            doc_start_byte_offset = cumulative_byte_offset
+            row_length = len(file_content[idx + 1].encode('utf-8'))  # Includes newline character
+             # Default or handle differently  # Includes newline character
+            cumulative_byte_offset += row_length + 1  # Update cumulative offset
+
+            # Process the text and get word positions
+            tokens, word_positions = process_text(combined_text)
+
+            doc_id = idx + 1  # Use the index as the document ID
+            word_data = {}
+            total_tokens = len(tokens)
+
+            # Process each token and its positions
+            for token, positions in word_positions.items():
+                if token in lexicon:
+                    word_id = lexicon[token]
+                    freq = len(positions)  # Frequency is the length of the positions list
+                    density = freq / total_tokens if total_tokens > 0 else 0
+                    word_data[word_id] = {
+                        "freq": freq,
+                        "density": density,
+                        "positions": positions  # Store positions of the word in the document
+                    }
+
+            # Prepare forward index entry
+            forward_entry = {
+                "word_data": word_data,
+                "byte_offset": [doc_start_byte_offset, row_length]  # Start byte offset and row length
+            }
+
+            # Write to the output file incrementally
+            if not first_doc:
+                output_file.write(",\n")  # Add a comma between entries
+            first_doc = False
+
+            # Write the current document's forward index
+            output_file.write(f'"{doc_id}": {json.dumps(forward_entry)}')
+
+    output_file.write("\n}\n")  # End JSON object
+
+print("Forward index with byte offsets saved incrementally to 'fwdIdx.json'")

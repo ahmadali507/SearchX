@@ -6,6 +6,7 @@ from nltk.corpus import wordnet
 from nltk.stem import WordNetLemmatizer
 import string
 import json
+import ast
 
 # Download necessary NLTK data
 nltk.download('averaged_perceptron_tagger')
@@ -74,7 +75,16 @@ curr_id = 1
 # Iterate through rows to build lexicon
 for index, row in test_csv.iterrows():
     # Combine text fields for tokenization
-    combined_text = f"{row.get('Name', '')} {row.get('Description', '')} {row.get('Language', '')} {row.get('Topics', '')}"
+ 
+    
+    topics_list = ast.literal_eval(row['Topics'])
+    processed_list = ["".join(topic.split()) for topic in topics_list]
+    topic = " ".join(processed_list)
+    
+    
+    
+    combined_text = f"{row.get('Name', '')} {row.get('Description', '')} {row.get('Language', '')} {topic}"
+
     # Process the combined text
     tokens = process_text(combined_text)
     # Get POS tags for tokens

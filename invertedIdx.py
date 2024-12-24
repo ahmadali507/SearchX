@@ -1,52 +1,68 @@
-import pandas as pd
-import nltk 
-from nltk.tokenize import word_tokenize
-from nltk.corpus import stopwords
-from nltk.stem import WordNetLemmatizer
+import math
 import json
-nltk.download('punkt')
-nltk.download('stopwords')
-nltk.download('wordnet')
 
-lemmatizer = WordNetLemmatizer()
-
-test_csv = pd.read_csv('test.csv')
-test_csv = test_csv.set_index(test_csv.index).to_dict(orient='index')
-# fwdIdx_csv = pd.read_csv('fwdIdx.csv')
+# Load forward index
 with open('fwdIdx.json', 'r') as f:
     forward_idx = json.load(f)
-with open('lexicon.json', 'r') as f:
-    lexicon = json.load(f)
-# for efficent lookups converting the data from csv in list format to dict .. for efficent hashmap lookups... 
-# fwdIdx = dict(zip(fwdIdx_csv['doc_id'], fwdIdx_csv['word_data']))
 
+# Total number of documents
+total_docs = len(forward_idx)
 
-inverted_idx = {}
-# list to store the doc_ids containing that word and the frequency of the word in that doc with density. 
+# Open the output file for writing the inverted index incrementally
+with open('inverted_index.json', 'w') as output_file:
+    output_file.write("{\n")  # Start of JSON object
 
-for doc_id, word_data in forward_idx.items(): 
-    # doc_id is the key and word_data is the value in the forward index.
-    # here we want the word_id to be key and the doc_data to be the values ... 
-    
-    for word_id, (freq, density) in word_data.items(): 
-        # now saving the word_id and doc_id in the inverted index... 
+    first_word = True  # To handle commas between word entries
+
+    # Process the forward index to build and write the inverted index incrementally
+    word_doc_data = {}  # Temporary dictionary to group data by word_id
+    for doc_id, doc_data in forward_idx.items():
+        byte_offset = doc_data.get("byte_offset")
+        word_data = doc_data.get("word_data")
         
-        if word_id not in inverted_idx: 
-            inverted_idx[word_id] = {}
-        # now we have the word_id in the inverted index..
-        # storing the doc_id and frequency and density of word in that doc in inverted index. 
-        if doc_id not in inverted_idx[word_id]:
-            inverted_idx[word_id][doc_id] = {
-                'freq': freq,
-                'density': density, 
-                'stars' : test_csv[int(doc_id)]['Stars'], 
-                'forks' : test_csv[int(doc_id)]['Forks'],
-                'URL' : test_csv[int(doc_id)]['URL'], # URL is important bcz we need to fetch it for efficient search results..
-                'Has_downloads' : test_csv[int(doc_id)]['Has Downloads'],
-                'Issues' : test_csv[int(doc_id)]['Issues'],
-                
-                # added stars and forks with doc_id to rank the results based on stars and forks for popularity of the repo
+        for word_id, metadata in word_data.items():
+            if word_id not in word_doc_data:
+                word_doc_data[word_id] = []
+
+            word_doc_data[word_id].append({
+                "doc_id": doc_id,
+                "freq": metadata["freq"],
+                "density": metadata["density"],
+                "byte_offset": byte_offset,
+                "positions": metadata["positions"]
+            })
+
+    # Process each word in word_doc_data and write it incrementally
+    for word_id, doc_data in word_doc_data.items():
+        if not first_word:
+            output_file.write(",\n")  # Add a comma between word entries
+        first_word = False
+
+        # Compute IDF for the current word
+        doc_freq = len(doc_data)
+        idf = math.log(total_docs / doc_freq) if doc_freq > 0 else 0
+
+        # Prepare postings list with TF-IDF values
+        postings_list = {}
+        for entry in doc_data:
+            doc_id = entry["doc_id"]
+            tf_idf = entry["density"] * idf  # Compute TF-IDF score
+            postings_list[doc_id] = {
+                "freq": entry["freq"],
+                "density": entry["density"],
+                "byte_offset": entry["byte_offset"],
+                "positions": entry["positions"],
+                "tf_idf": tf_idf
             }
-with open('invertedIdx.json', 'w') as f:
-    json.dump(inverted_idx, f, indent=4)
-print("Optimized inverted index saved to 'invertedIdx.json'")
+
+        # Sort postings by TF-IDF
+        sorted_documents = sorted(postings_list.items(), key=lambda x: x[1]["tf_idf"], reverse=True)
+
+        # Write the word entry to the file in correct JSON format
+        word_entry = f'"{word_id}": ' + json.dumps(dict(sorted_documents), indent=4)
+        output_file.write(word_entry)
+
+    # End of JSON object
+    output_file.write("\n}\n")
+
+print("Inverted index with positions and TF-IDF saved incrementally to 'inverted_index.json'")

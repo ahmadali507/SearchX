@@ -1,91 +1,137 @@
-import pandas as pd
+import csv
+import json
 import nltk
 from nltk.tokenize import word_tokenize
 from nltk.corpus import stopwords
 from nltk.stem import WordNetLemmatizer
 import string
-import json
 
-# # Download necessary NLTK data
-# nltk.download('punkt')
-# nltk.download('stopwords')
-# nltk.download('wordnet')
+# Download necessary NLTK data
+nltk.download('punkt')
+nltk.download('stopwords')
 
-# Load inverted index and lexicon
-with open('invertedIdx.json', 'r') as f:
-    inverted_index = json.load(f)
+# Initialize the lemmatizer
+lemmatizer = WordNetLemmatizer()
+
+# Load necessary files
+with open('inverted_index.json', 'r') as f:
+    inverted_idx = json.load(f)
+
 with open('lexicon.json', 'r') as f:
     lexicon = json.load(f)
-test_csv = pd.read_csv('test.csv')
-test_csv = test_csv.set_index(test_csv.index).to_dict(orient='index')
 
-# Function to preprocess text
-def process_query(search_text):
-    lemmatizer = WordNetLemmatizer()
+# Preprocess text to handle queries
+def process_text(text):
+    """
+    Preprocess the query text: tokenize, remove stopwords, and punctuation.
+    """
     stop_words = set(stopwords.words('english'))
-    tokens = word_tokenize(search_text.lower())
-    processed_tokens = [
-        lemmatizer.lemmatize(word)
-        for word in tokens
-        if word not in stop_words and word not in string.punctuation
-    ]
+    punctuation_set = set(string.punctuation)
+    tokens = word_tokenize(text.lower())
+    
+    processed_tokens = []
+    for token in tokens:
+        token = token.replace("'", "")
+        if token not in stop_words and token not in punctuation_set and len(token) > 1:
+            processed_tokens.append(token)
     return processed_tokens
 
-# Search function based on the new structure
-def search(search_text):
-    specific_tokens = process_query(search_text)
-    print(f"Processed Query Tokens: {specific_tokens}")
+# Multi-word search function
+def multi_word_search(query, file_path='repositories.csv', top_n=1000):
+    """
+    Perform a search for multi-word queries.
+
+    Parameters:
+        query (str): The search query (single or multiple words).
+        file_path (str): Path to the dataset file.
+        top_n (int): Number of top results to return.
+
+    Returns:
+        list: List of search results with relevant information.
+    """
+    # Preprocess the query
+    tokens = process_text(query)
+    if not tokens:
+        return []
     
-    # Convert tokens into word IDs using the lexicon
-    word_ids = [lexicon[token] for token in specific_tokens if token in lexicon]
-    print(lexicon['cpp'])
-    print(f"Word IDs: {word_ids}")
+    # Retrieve documents for all tokens
+    doc_scores = {}
+    for token in tokens:
+        if token not in lexicon:
+            continue  # Skip tokens not in the lexicon
+        
+        word_id = str(lexicon[token])  # Convert to string to match inverted index keys
+        if word_id not in inverted_idx:
+            continue  # Skip tokens not in the inverted index
+        
+        documents = inverted_idx[word_id]
+        for doc_id, doc_data in documents.items():
+            if doc_id not in doc_scores:
+                doc_scores[doc_id] = {
+                    'freq': 0,
+                    'density': 0,
+                    'tokens': set()
+                }
+            # Aggregate scores and track tokens present
+            doc_scores[doc_id]['freq'] += doc_data['freq']
+            doc_scores[doc_id]['density'] += doc_data['density']
+            doc_scores[doc_id]['tokens'].add(token)
     
-    results = {}
-    
-    # Iterate through the word IDs in the inverted index
-    for word_id in word_ids:
-        word_id_str = str(word_id)  # Convert to string to match keys in inverted index
-        if word_id_str in inverted_index:
-            # Iterate through documents containing the word
-            for doc_id, doc_data in inverted_index[word_id_str].items():
-                if doc_id not in results:
-                    # Add document to results if not already present
-                    results[doc_id] = {
-                        'Name' : test_csv[int(doc_id)]['Name'],
-                        'Description' : test_csv[int(doc_id)]['Description'],
+    # Read dataset and fetch document details using byte offsets
+    results = []
+    with open(file_path, 'r', encoding='utf-8', newline='') as file:
+        csv_reader = csv.reader(file, quotechar='"')  # Properly parse CSV rows with quoting
+        for doc_id, score_data in doc_scores.items():
+            # Skip documents that don't contain all query tokens
+            if len(score_data['tokens']) < len(tokens):
+                continue
+            
+            # Retrieve document details from byte offset
+            byte_offset = inverted_idx[str(lexicon[list(score_data['tokens'])[0]])][doc_id]['byte_offset']
+            start, length = byte_offset
+            file.seek(start)  # Jump to the document's start position
+            doc_content = file.read(length).strip()
+            
+            # Parse the row using csv.reader
+            try:
+                row = next(csv.reader([doc_content], quotechar='"'))
+                if len(row) >= 8:  # Ensure enough fields exist
+                    name = row[0].strip()
+                    description = row[1].strip()
+                    stars = int(row[6]) if row[6].isdigit() else 0
+                    forks = int(row[7]) if row[7].isdigit() else 0
+                    url = row[2].strip()
+                    
+                    # Append the result
+                    results.append({
                         'doc_id': doc_id,
-                        'score': 0,
-                        'stars': doc_data['stars'],
-                        'forks': doc_data['forks'],
-                        'url': doc_data['URL'],
-                        'issues': doc_data['Issues'],
-                        'Languages' : test_csv[int(doc_id)]['Language'],
-                        'Topics' : test_csv[int(doc_id)]['Topics']
-                        # 'has_downloads': doc_data['Has_downloads']
-                    }
-                # Update the score based on frequency and density
-                results[doc_id]['score'] += doc_data['freq'] + (doc_data['density'] * 10)
+                        'freq': score_data['freq'],  # Aggregated frequency
+                        'density': score_data['density'],  # Aggregated density
+                        'name': name,
+                        'description': description,
+                        'stars': stars,
+                        'forks': forks,
+                        'url': url
+                    })
+            except (csv.Error, StopIteration) as e:
+                print(f"Error parsing CSV line: {doc_content}. Error: {e}")
+                break
     
-    # print(f"Raw Results: {results}")
+    # Sort results by relevance (e.g., frequency or density)
+    results = sorted(results, key=lambda x: (x['freq'], x['density']), reverse=True)
     
-    # Sort results by score, stars, and forks (in descending order)
-    ranked_results = sorted(
-        results.values(),
-        key=lambda x: (x['score'], x['stars'], x['forks']),
-        reverse=True
-    )
-    
-    # Return top N results
-    top_n = 100
-    return ranked_results[:top_n]
+    return results[:top_n]  # Return only the top_n results
 
-# Example query
-query = "LEETCODE PROBLEM SOLVING"
-search_results = search(query)
-
-# Display results
-for result in search_results:
-    print(f"Name: {result['Name']}, Description: {result['Description']}, Stars: {result['stars']}, Forks: {result['forks']}, URL: {result['url']}, Languages: {result['Languages']}, Topics: {result['Topics']}")
-    print('\n')
+# Example usage
+if _name_ == "_main_":
+    query = input("Enter your search query (single or multiple words): ").strip()
+    results = multi_word_search(query, file_path='repositories.csv', top_n=15)
     
+    if results:
+        for result in results:
+            print(f"Doc ID: {result['doc_id']}, Frequency: {result['freq']}, Density: {result['density']}")
+            print(f"Name: {result['name']}, Description: {result['description']}")
+            print(f"Stars: {result['stars']}, Forks: {result['forks']}, URL: {result['url']}")
+            print("-" * 50)
+    else:
+        print("No results found for the query.")
