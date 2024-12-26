@@ -15,7 +15,7 @@ nltk.download('punkt')
 lemmatizer = WordNetLemmatizer()
 
 # Load the lexicon
-with open('lexicon.json', 'r') as f:
+with open('lexicon_data.json', 'r') as f:
     lexicon = json.load(f)
 
 # Function to process text (tokenize and get word positions)
@@ -55,22 +55,18 @@ def process_text(text):
 # Open the output file for writing incrementally
 with open('fwdIdx.json', 'w') as output_file:
     output_file.write("{\n")  # Start JSON object
-
     cumulative_byte_offset = 213  # Initial byte offset, unchanged
     first_doc = True  # Handle commas between entries
-
     # Load the test CSV for processing
     test_csv = pd.read_csv('repositories.csv')
     with open('repositories.csv', 'r', encoding='utf-8') as f:
         file_content = f.readlines()
-
         # Process each row in the test CSV
         for idx, row in test_csv.iterrows():
             topics_list = ast.literal_eval(row['Topics'])
             processed_list = ["".join(topic.split()) for topic in topics_list]
             topic = " ".join(processed_list)
             combined_text = f"{row['Name']} {row['Description']} {row['URL']} {row['Language']} {topic}"
-
             # Calculate byte offset and row length
             doc_start_byte_offset = cumulative_byte_offset
             row_length = len(file_content[idx + 1].encode('utf-8'))  # Includes newline character
@@ -83,7 +79,6 @@ with open('fwdIdx.json', 'w') as output_file:
             doc_id = idx + 1  # Use the index as the document ID
             word_data = {}
             total_tokens = len(tokens)
-
             # Process each token and its positions
             for token, positions in word_positions.items():
                 if token in lexicon:
@@ -112,4 +107,4 @@ with open('fwdIdx.json', 'w') as output_file:
 
     output_file.write("\n}\n")  # End JSON object
 
-print("Forward index with byte offsets saved incrementally to 'fwdIdx.json'")
+print("Forward index with byte offsets saved incrementally to 'fwdIdx.json'")

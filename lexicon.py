@@ -15,7 +15,7 @@ nltk.download('stopwords')
 nltk.download('wordnet')
 nltk.download('omw-1.4')
 
-test_csv = pd.read_csv('test.csv')
+test_csv = pd.read_csv('repositories.csv')
 lemmatizer = WordNetLemmatizer()
 
 def get_wordnet_pos(tag):
@@ -38,7 +38,7 @@ def process_text(text):
     tokens = word_tokenize(text.lower())
     # Process tokens
     processed_tokens = []
-    domain_suffixes = [".com", ".org", ".dev", ".gov", ".io", ".edu", ".net"]
+    domain_suffixes = [".com", ".org", ".dev", ".gov", ".io", ".edu", ".net",".js", ".cpp", ".json",]
     for token in tokens:
         token = token.replace("'", "")
         # if there is any link token somewhere skip it inside the document text. 
