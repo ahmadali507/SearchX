@@ -82,6 +82,7 @@ ENV.bak/
 *.db
 *.csv
 *.json
+*.msgpack
 
 # Test results
 coverage/
