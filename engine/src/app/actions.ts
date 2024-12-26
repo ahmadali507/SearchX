@@ -1,6 +1,7 @@
 'use server'
 
 import { Octokit } from "@octokit/rest";
+import axios from "axios";
 
 const octokit = new Octokit({
   auth: process.env.GITHUB_API_TOKEN
@@ -8,26 +9,36 @@ const octokit = new Octokit({
 
 export async function searchRepositories(query: string) {
   try {
-    const response = await octokit.search.repos({
-      q: query,
-      sort: "stars",
-      order: "desc",
-      per_page: 10,
-    });
+
+    console.log('entered the search part')
+    // const response = await octokit.search.repos({
+    //   q: query,
+    //   sort: "stars",
+    //   order: "desc",
+    //   per_page: 10,
+    // });
     
+    const reqData = {query :query}; 
+
+    console.log(reqData)
+    const response = await axios.post('http://localhost:5000/search', reqData , {
+      headers : {
+        "Content-Type" : "application/json",
+      }
+    }); 
+
+    console.log(response.data.results[0].description);
     const detailedResults = await Promise.all(
-      response.data.items.map(async (repo) => {
-        const { data: repoDetails } = await octokit.repos.get({
-          owner: repo.owner.login,
-          repo: repo.name,
-        });
+      response.data.results.map(async (repo) => {
+        const {name, description, forks, stars, watchers, url} = repo;
         
         return {
-          ...repo,
-          topics: repoDetails.topics,
-          license: repoDetails.license,
-          updated_at: repoDetails.updated_at,
-          watchers_count: repoDetails.watchers_count,
+          name : name, 
+          description : description, 
+          forks : forks, 
+          stars : stars, 
+          watchers : watchers,
+          url : url,
         };
       })
     );
