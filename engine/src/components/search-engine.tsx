@@ -2,9 +2,9 @@
 
 import { useState } from 'react'
 import { searchRepositories } from '../app/actions'
-import { Input } from "@/components/ui/input"
-import { Button } from "@/components/ui/button"
-import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card"
+import { Input } from "./ui/input"
+import { Button } from "./ui/button"
+import { Card, CardContent, CardHeader, CardTitle } from "./ui/card"
 import { Star, GitFork, ExternalLink, Search, Code, FileCode, Folder, Calendar, Lock, Unlock, Tag, Eye, AlertCircle } from 'lucide-react'
 
 export default function SearchEngine() {
@@ -62,7 +62,7 @@ export default function SearchEngine() {
         </div>
       )}
 
-      <div className="space-y-6">
+      <div key={Math.random()} className="space-y-6">
         {results.map((repo) => (
           <Card key={repo.id} className="bg-white bg-opacity-80 backdrop-blur-sm border-blue-200 shadow-lg hover:shadow-xl transition-all duration-300 ease-in-out transform hover:scale-102 rounded-xl overflow-hidden">
             <CardHeader className="flex flex-row items-center space-x-4 pb-2 bg-gradient-to-r from-blue-500 to-blue-600 text-white">

@@ -27,15 +27,16 @@ b = 0.75  # BM25 parameter
 nltk.download('punkt')
 nltk.download('stopwords')
 nltk.download('wordnet')
+nltk.download('punkt_tab')
 
 # Initialize the lemmatizer
 lemmatizer = WordNetLemmatizer()
 
 # Load the lexicon
 with open('lexicon_data.json', 'r') as f:
-    start_time = time.time()
+    start_time = time.perf_counter()
     lexicon = json.load(f)
-    end_time = time.time()
+    end_time = time.perf_counter()
     print(f'time taken in loading lexicon: {(end_time - start_time) * 1000} ms')
 
 def process_text(text):
@@ -91,11 +92,14 @@ def process_token_batch(tokens, lexicon):
             barrel_files[barrel_filename] = []
         barrel_files[barrel_filename].append(word_id)
     
+    start = time.perf_counter()
     with ThreadPoolExecutor(max_workers=NUM_THREADS) as executor:
         barrels = {
             filename: executor.submit(load_barrel, filename) for filename in barrel_files.keys()
         }
-    
+    end = time.perf_counter()
+    print("time to load a barrel", end - start)
+    start = time.perf_counter()
     for barrel_filename, word_ids in barrel_files.items():
         barrel_data = barrels[barrel_filename].result()
         for word_id in word_ids:
@@ -107,12 +111,15 @@ def process_token_batch(tokens, lexicon):
                     doc_scores[doc_id] = {
                         'freq': 0,
                         'density': 0,
-                        'tokens': set()
+                        'tokens': set(),
+                        'byte_offset' : []
                     }
                 doc_scores[doc_id]['freq'] += doc_data['freq']
                 doc_scores[doc_id]['density'] += doc_data['density']
                 doc_scores[doc_id]['tokens'].add(token)
-    
+                doc_scores[doc_id]['byte_offset'] = doc_data['byte_offset']
+    end = time.perf_counter()
+    print("time to score", end - start)
     return doc_scores
 
 def compute_avg_doc_len(file_path='repositories.csv'):
@@ -135,6 +142,7 @@ def calculate_idf(term, lexicon, barrel_data, total_docs):
         return 0
     word_id = str(lexicon[term])
     doc_count = len(barrel_data.get(word_id, {}))
+    # print("doc_count", doc_count)
     if doc_count == 0:
         return 0
     return math.log((total_docs - doc_count + 0.5) / (doc_count + 0.5) + 1)
@@ -145,12 +153,12 @@ def bm25_score(frequency, doc_len, avg_doc_len, idf):
     return idf * (numerator / denominator)
 
 def multi_word_search(query, file_path='repositories.csv', top_n=1000):
-    start_time = time.time()
+    start_time = time.perf_counter()
     
     tokens = process_text(query)
     
-    process_end = time.time()
-    print(f'Time taken to process the query into tokens: {(process_end - start_time) * 1000} ms')
+    process_end = time.perf_counter()
+    print(f'Time taken to process the query into tokens: {(process_end - start_time)/1000} ms')
     if not tokens:
         print("No valid tokens found in the query.")
         return []
@@ -162,6 +170,7 @@ def multi_word_search(query, file_path='repositories.csv', top_n=1000):
         csv_reader = csv.reader(file, quotechar='"', delimiter=',', skipinitialspace=True)
         csv_rows = list(csv_reader)
         total_docs = len(csv_rows)
+
         
         for doc_id, score_data in doc_scores.items():
             try:
@@ -196,9 +205,14 @@ def multi_word_search(query, file_path='repositories.csv', top_n=1000):
             except (IndexError, ValueError) as e:
                 print(f"Error accessing document ID {doc_id}: {e}")
     
+    start_csv = time.perf_counter()
     results = sorted(results, key=lambda x: x['bm25_score'], reverse=True)
+    end_csv = time.perf_counter()
+    print("result calculation time")
+    print((end_csv - start_csv )/1000 )
+    print("total docs", len(results))
     
-    end_time = time.time()
+    end_time = time.perf_counter()
     search_time = end_time - start_time
     
     print(f"Search completed in {search_time:.4f} seconds.")
@@ -213,13 +227,14 @@ def search():
     
     if not query:
         return jsonify({'error': 'Query is required'}), 400
-    
+    start = time.perf_counter()
     results = multi_word_search(query)
-    
+    end = time.perf_counter()
+    print("total time", end - start)
     if not results:
         return jsonify({'message': 'No results found', 'results': []}), 200
     print(results[0])
-    return jsonify({'message': 'Search successful', 'results': results}), 200
+    return jsonify({'message': 'Search successful', 'results': results[:10]}), 200
 
 if __name__ == '__main__':
     app.run(debug=True)
