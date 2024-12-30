@@ -2,12 +2,15 @@
 
 import { useState } from 'react'
 import { searchRepositories } from '../app/actions'
-import { Input } from "./ui/input"
-import { Button } from "./ui/button"
 import { Card, CardContent, CardHeader, CardTitle } from "./ui/card"
 import { Star, GitFork, ExternalLink, Search, Code, FileCode, Folder, Calendar, Lock, Unlock, Tag, Eye, AlertCircle } from 'lucide-react'
+import { Input } from './ui/input'
+import { Button } from './ui/button'
+import { useRouter } from 'next/navigation'
 
 export default function SearchEngine() {
+
+  const router = useRouter()
   const [query, setQuery] = useState<string | undefined>('')
   const [results, setResults] = useState([])
   const [loading, setLoading] = useState(false)
@@ -52,6 +55,9 @@ export default function SearchEngine() {
         </div>
         <Button type="submit" disabled={loading} className="bg-blue-600 hover:bg-blue-700 text-white rounded-full px-6 py-3 shadow-lg transition-all duration-300 ease-in-out transform hover:scale-105">
           {loading ? 'Searching...' : 'Search'}
+        </Button>
+        <Button onClick={()=> router.push('/upload')} disabled={loading} variant='outline' className="rounded-full">
+          Upload
         </Button>
       </form>
 
