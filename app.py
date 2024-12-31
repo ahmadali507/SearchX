@@ -1,4 +1,5 @@
 from flask import Flask, request, jsonify
+from flask_cors import CORS
 import csv
 import msgpack
 import os
@@ -10,231 +11,293 @@ from nltk.tokenize import word_tokenize
 from nltk.corpus import stopwords
 from nltk.stem import WordNetLemmatizer
 import string
-from flask_cors import CORS
-import math
+from typing import Dict, List, Set, Tuple
+from collections import defaultdict
+import heapq
+import ast
 
-# Initialize Flask app
 app = Flask(__name__)
 CORS(app)
 
-# Define constants
+# Constants
 WORD_ID_RANGE = 1000
+BARRELS_SIZE = 120
 NUM_THREADS = 4
-k1 = 1.5  # BM25 parameter
-b = 0.75  # BM25 parameter
+CACHE_SIZE = 1000
 
-# Download necessary NLTK data
-nltk.download('punkt')
-nltk.download('stopwords')
-nltk.download('wordnet')
-nltk.download('punkt_tab')
-
-# Initialize the lemmatizer
+# Initialize NLTK
+nltk.download('punkt', quiet=True)
+nltk.download('stopwords', quiet=True)
+nltk.download('wordnet', quiet=True)
 lemmatizer = WordNetLemmatizer()
 
-# Load the lexicon
-with open('lexicon_data.json', 'r') as f:
-    start_time = time.perf_counter()
-    lexicon = json.load(f)
-    end_time = time.perf_counter()
-    print(f'time taken in loading lexicon: {(end_time - start_time) * 1000} ms')
+# Load data at startup
+def load_offset_index():
+    try:
+        with open('barrel_offset_index.msgpack', 'rb') as f:
+            return msgpack.unpackb(f.read(), raw=False)
+    except FileNotFoundError:
+        print("Error: Offset index not found!")
+        return {}
 
-def process_text(text):
-    stop_words = set(stopwords.words('english'))
-    punctuation_set = set(string.punctuation)
+offset_index = load_offset_index()
+stop_words = set(stopwords.words('english'))
+punctuation_set = set(string.punctuation)
+
+with open('lexicon_data.json', 'r') as f:
+    lexicon = json.load(f)
+
+# Cache for document data
+doc_cache = {}
+
+def read_word_data(word_id: str) -> Dict:
+    if word_id not in offset_index:
+        return None
+        
+    location = offset_index[word_id]
+    barrel_id = location['barrel_id']
+    barrel_filename = f'barrels/barrel_{barrel_id}.msgpack'
+    
+    try:
+        with open(barrel_filename, 'rb') as barrel_file:
+            barrel_data = msgpack.unpackb(barrel_file.read(), raw=False)
+            return barrel_data.get(word_id, {})
+    except Exception as e:
+        print(f"Error reading barrel {barrel_id}: {e}")
+        return None
+
+def process_text_with_positions(text: str) -> Tuple[List[str], List[int]]:
     tokens = word_tokenize(text.lower())
     processed_tokens = []
-    domain_suffixes = [".com", ".org", ".dev", ".gov", ".io", ".edu", ".net", ".js", ".cpp", ".json"]
+    token_positions = []
+    domain_suffixes = frozenset([".com", ".org", ".dev", ".gov", ".io", ".edu", ".net", ".js", ".cpp", ".json"])
     
-    for token in tokens:
-        token = token.replace("'", "")
-        if token.startswith(("http", "www", "//")):
+    for index, token in enumerate(tokens):
+        token = token.replace("'", "").lstrip('/')
+        
+        if any((
+            not token.isascii(),
+            token.startswith(("http", "www", "//")),
+            token in stop_words,
+            token in punctuation_set,
+            len(token) <= 1
+        )):
             continue
+            
         if token.endswith("'s"):
             token = token[:-2]
+        
         for suffix in domain_suffixes:
             if token.endswith(suffix):
                 token = token[:-len(suffix)]
                 break
-        if not token.isascii():
-            continue
-        token = token.lstrip('/')
+                
         if '-' in token:
             sub_tokens = token.split('-')
-            for sub_token in sub_tokens:
-                if sub_token not in stop_words and sub_token not in punctuation_set:
-                    processed_tokens.append(sub_token)
+            valid_subtokens = [st for st in sub_tokens if st not in stop_words and st not in punctuation_set]
+            processed_tokens.extend(valid_subtokens)
+            token_positions.extend([index] * len(valid_subtokens))
         else:
-            if token not in stop_words and token not in punctuation_set and len(token) > 1:
-                processed_tokens.append(token)
-    return processed_tokens
+            processed_tokens.append(token)
+            token_positions.append(index)
+            
+    return processed_tokens, token_positions
 
-def get_barrel_filename(word_id):
-    barrel_id = int(word_id) // WORD_ID_RANGE
-    return f'barrels/barrel_{barrel_id}.msgpack'
+def process_token_batch(tokens: List[str], lexicon: Dict[str, str]) -> Dict:
+    doc_scores = defaultdict(lambda: {
+        'freq': 0,
+        'density': 0,
+        'position_score': 0,
+        'match_count': 0,
+        'tokens': set(),
+        'positions': [],
+        'byte_offset': None
+    })
 
-def load_barrel(barrel_filename):
-    if not os.path.exists(barrel_filename):
-        return {}
-    with open(barrel_filename, 'rb') as f:
-        return msgpack.unpackb(f.read(), raw=False)
+    total_tokens = len(tokens)
 
-def process_token_batch(tokens, lexicon):
-    doc_scores = {}
-    barrel_files = {}
-    
-    for token in tokens:
-        if token not in lexicon:
-            continue
-        word_id = str(lexicon[token])
-        barrel_filename = get_barrel_filename(word_id)
-        if barrel_filename not in barrel_files:
-            barrel_files[barrel_filename] = []
-        barrel_files[barrel_filename].append(word_id)
-    
-    start = time.perf_counter()
+    def calculate_position_score(positions: List[int]) -> float:
+        """Calculate a position-based score."""
+        if not positions:
+            return 0
+        positions.sort()
+        range_positions = positions[-1] - positions[0] + 1
+        return len(positions) / range_positions
+
+    def process_token(token):
+        if token in lexicon:
+            word_id = str(lexicon[token])
+            return token, word_id, read_word_data(word_id)
+        return None
+
     with ThreadPoolExecutor(max_workers=NUM_THREADS) as executor:
-        barrels = {
-            filename: executor.submit(load_barrel, filename) for filename in barrel_files.keys()
-        }
-    end = time.perf_counter()
-    print("time to load a barrel", end - start)
-    start = time.perf_counter()
-    for barrel_filename, word_ids in barrel_files.items():
-        barrel_data = barrels[barrel_filename].result()
-        for word_id in word_ids:
-            if word_id not in barrel_data:
+        results = list(executor.map(process_token, tokens))
+
+        for result in results:
+            if not result:
                 continue
-            documents = barrel_data[word_id]
-            for doc_id, doc_data in documents.items():
-                if doc_id not in doc_scores:
-                    doc_scores[doc_id] = {
-                        'freq': 0,
-                        'density': 0,
-                        'tokens': set(),
-                        'byte_offset' : []
-                    }
+
+            token, word_id, word_data = result
+            if not word_data:
+                continue
+
+            for doc_id, doc_data in word_data.items():
                 doc_scores[doc_id]['freq'] += doc_data['freq']
                 doc_scores[doc_id]['density'] += doc_data['density']
                 doc_scores[doc_id]['tokens'].add(token)
-                doc_scores[doc_id]['byte_offset'] = doc_data['byte_offset']
-    end = time.perf_counter()
-    print("time to score", end - start)
-    return doc_scores
+                doc_scores[doc_id]['positions'].extend(doc_data['positions'])
+                doc_scores[doc_id]['match_count'] += 1
+                if doc_scores[doc_id]['byte_offset'] is None:
+                    doc_scores[doc_id]['byte_offset'] = doc_data['byte_offset']
 
-def compute_avg_doc_len(file_path='repositories.csv'):
-    total_length = 0
-    total_docs = 0
-    
-    with open(file_path, 'r', encoding='utf-8', newline='') as file:
-        csv_reader = csv.reader(file, quotechar='"', delimiter=',', skipinitialspace=True)
-        for row in csv_reader:
-            description = row[1].strip() if len(row) >= 8 else ""
-            total_length += len(word_tokenize(description.lower()))
-            total_docs += 1
-    
-    return total_length / total_docs if total_docs > 0 else 1
+    # Normalize frequency and density for fair weighting
+    max_freq = max(score['freq'] for score in doc_scores.values())
+    max_density = max(score['density'] for score in doc_scores.values())
 
-avg_doc_len = compute_avg_doc_len()
+    for doc_id, score in doc_scores.items():
+        coverage = score['match_count'] / total_tokens
 
-def calculate_idf(term, lexicon, barrel_data, total_docs):
-    if term not in lexicon:
-        return 0
-    word_id = str(lexicon[term])
-    doc_count = len(barrel_data.get(word_id, {}))
-    # print("doc_count", doc_count)
-    if doc_count == 0:
-        return 0
-    return math.log((total_docs - doc_count + 0.5) / (doc_count + 0.5) + 1)
+        score['position_score'] = calculate_position_score(score['positions'])
+        normalized_freq = score['freq'] / max_freq if max_freq else 0
+        normalized_density = score['density'] / max_density if max_density else 0
 
-def bm25_score(frequency, doc_len, avg_doc_len, idf):
-    numerator = frequency * (k1 + 1)
-    denominator = frequency + k1 * (1 - b + b * (doc_len / avg_doc_len))
-    return idf * (numerator / denominator)
+        # Final scoring
+        score['final_score'] = (
+            normalized_density * 0.1 +
+            normalized_freq * 0.1 +
+            score['position_score'] * 0.4 +
+            coverage * 0.4
+        )
 
-def multi_word_search(query, file_path='repositories.csv', top_n=1000):
-    start_time = time.perf_counter()
-    
-    tokens = process_text(query)
-    
-    process_end = time.perf_counter()
-    print(f'Time taken to process the query into tokens: {(process_end - start_time)/1000} ms')
-    if not tokens:
-        print("No valid tokens found in the query.")
-        return []
-    
-    doc_scores = process_token_batch(tokens, lexicon)
-    
-    results = []
-    with open(file_path, 'r', encoding='utf-8', newline='') as file:
-        csv_reader = csv.reader(file, quotechar='"', delimiter=',', skipinitialspace=True)
-        csv_rows = list(csv_reader)
-        total_docs = len(csv_rows)
+    # Sort by final_score in descending order
+    return dict(sorted(
+        doc_scores.items(),
+        key=lambda item: item[1]['final_score'],
+        reverse=True
+    ))
+def calculate_score(name_match: int, description_match: int, freq: int, density: int, alpha=0.4, beta=0.5, gamma=0.1):
+    """Scoring function for ranking documents."""
+    return alpha * name_match + beta * description_match + gamma * (freq + density)
 
+def paginated_search(query: str, page: int, per_page: int, file_path: str = 'repositories.csv') -> Tuple[List[Dict], float, int, Dict]:
+    start = time.perf_counter()
+    
+    if not query or not isinstance(query, str):
+        return [], 0, 0, {}
         
-        for doc_id, score_data in doc_scores.items():
+    if not os.path.exists(file_path):
+        return [], 0, 0, {}
+    
+    query_tokens, _ = process_text_with_positions(query)
+    if not query_tokens:
+        return [], 0, 0, {}
+    
+    doc_scores = process_token_batch(query_tokens, lexicon)
+    # print("QUERY SCORES" , doc_scores)
+    if not doc_scores:
+        return [], 0, 0, {}
+    
+    total_results = len(doc_scores)
+    start_idx = min((page - 1) * per_page, total_results)
+    end_idx = min(start_idx + per_page, total_results)
+    print("START AND END IDX", start_idx, end_idx)
+    top_docs = dict(list(doc_scores.items())[start_idx : (end_idx)])
+    print("Length fo top_docs", len(top_docs))
+    heap = []
+    results = []
+    
+    with open(file_path, 'rb') as file:
+        for doc_id, score_data in top_docs.items():
             try:
-                row = csv_rows[int(doc_id)]
-                if len(row) >= 8:
-                    name = row[0].strip()
-                    description = row[1].strip()
-                    stars = int(row[4]) if row[4].isdigit() else 0
-                    forks = int(row[5]) if row[5].isdigit() else 0
-                    watchers = int(row[7]) if row[7].isdigit() else 0
-                    url = row[2].strip()
-                    
-                    bm25 = 0
-                    doc_len = len(word_tokenize(description + name))
-                    for token in score_data['tokens']:
-                        idf = calculate_idf(token, lexicon, score_data, total_docs)
-                        frequency = score_data['freq']
-                        bm25 += bm25_score(frequency, doc_len, avg_doc_len, idf)
-                    
-                    results.append({
-                        'doc_id': doc_id,
-                        'bm25_score': bm25,
-                        'freq': score_data['freq'],
-                        'density': score_data['density'],
-                        'name': name,
-                        'description': description,
-                        'stars': stars,
-                        'forks': forks,
-                        'watchers': watchers,
-                        'url': url
-                    })
-            except (IndexError, ValueError) as e:
-                print(f"Error accessing document ID {doc_id}: {e}")
+                offset, length = score_data.get('byte_offset', (0, 0))
+                file.seek(offset)
+                row = next(csv.reader(
+                    [file.read(length).decode('utf-8', errors='ignore').strip()],
+                    quotechar='"', delimiter=',', skipinitialspace=True
+                ))
+                
+                # Calculate name and description match scores
+                name = row[0].strip().lower()
+                description = row[1].strip().lower()
+                name_match = sum(1 for token in query_tokens if token in name)
+                description_match = sum(1 for token in query_tokens if token in description)
+                
+                # Compute final score
+                final_score = calculate_score(
+                    name_match=name_match,
+                    description_match=description_match,
+                    freq=score_data['freq'],
+                    density=score_data['density']
+                )
+                
+                # Push document to the max-heap
+                heapq.heappush(heap, (-final_score, doc_id, {
+                    'doc_id': doc_id,
+                    'name': row[0].strip(),
+                    'description': row[1].strip(),
+                    'url': row[2].strip(),
+                    'watchers': int(row[7]) if row[7].isdigit() else 0,
+                    'language': row[8] if row[8] else "",
+                    'Topics': ast.literal_eval(row[9] if row[9] else "[]"),
+                    'stars': int(row[4]) if row[4].isdigit() else 0,
+                    'forks': int(row[5]) if row[5].isdigit() else 0,
+                    'freq': score_data['freq'],
+                    'density': score_data['density'],
+                    'final_score': -final_score  # Negated to maintain original value
+                }))
+            except Exception as e:
+                print(f"Error processing row: {e}")
+                continue
     
-    start_csv = time.perf_counter()
-    results = sorted(results, key=lambda x: x['bm25_score'], reverse=True)
-    end_csv = time.perf_counter()
-    print("result calculation time")
-    print((end_csv - start_csv )/1000 )
-    print("total docs", len(results))
-    
-    end_time = time.perf_counter()
-    search_time = end_time - start_time
-    
-    print(f"Search completed in {search_time:.4f} seconds.")
-    return results[:top_n]
+    # Extract top results based on the heap
+    top_results = [heapq.heappop(heap)[2] for _ in range(min(len(heap), per_page))]
+    search_time = (time.perf_counter() - start) * 1000
+    return top_results, search_time, total_results
 
 @app.route('/search', methods=['POST'])
 def search():
-    data = request.json
-    print('received data', data)
-    query = data.get('query', '')
-    print(query)
-    
-    if not query:
-        return jsonify({'error': 'Query is required'}), 400
-    start = time.perf_counter()
-    results = multi_word_search(query)
-    end = time.perf_counter()
-    print("total time", end - start)
-    if not results:
-        return jsonify({'message': 'No results found', 'results': []}), 200
-    print(results[0])
-    return jsonify({'message': 'Search successful', 'results': results[:10]}), 200
+    try:
+        print("hello")
+        data = request.json
+        if not data or 'query' not in data:
+            return jsonify({'error': 'No query provided', 'status': 400}), 400
+        
+        query = data['query']
+        page = int(data.get('page', 1))
+        per_page = int(data.get('per_page', 10))
+        if page < 1 or per_page < 1:
+            return jsonify({'error': 'Invalid pagination parameters', 'status': 400}), 400
+        
+        
+        results, search_time, total_count = paginated_search(
+            query,
+            page=page,
+            per_page=per_page,
+            file_path='repositories.csv'
+        )
+        print(search_time)
+        return jsonify({
+            'status': 200,
+            'results': results,
+            'search_time_ms': round(search_time, 2),
+            'total_count': total_count,
+            'current_page': page,
+            'per_page': per_page,
+            'total_pages': -(-total_count // per_page),
+            'query': query
+        })
+        
+        
+        
+    except Exception as e:
+        return jsonify({'error': str(e), 'status': 500}), 500
+@app.route('/health', methods=['GET'])
+def health_check():
+    return jsonify({
+        'status': 'healthy',
+        'timestamp': time.time(),
+        'cache_size': len(doc_cache)
+    })
 
 if __name__ == '__main__':
-    app.run(debug=True)
+    app.run(host='0.0.0.0', port=5000)
