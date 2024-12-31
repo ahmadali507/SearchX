@@ -83,7 +83,7 @@ for index, row in test_csv.iterrows():
     
     
     
-    combined_text = f"{row.get('Name', '')} {row.get('Description', '')} {row.get('Language', '')} {topic}"
+    combined_text = f"{row.get('Name', '')} {row.get('Description', '')} {row.get('Language', '')}"
 
     # Process the combined text
     tokens = process_text(combined_text)
@@ -106,3 +106,5 @@ with open('lexicon_data.json', 'w') as f:
     json.dump(lexicon, f, indent=4)
 
 print("Optimized lexicon saved to 'lexicon_data.json'")
+
+
