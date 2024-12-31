@@ -2,7 +2,7 @@ import math
 import json
 
 # Load forward index
-with open('fwdidx.json', 'r') as f:
+with open('fwdIdx.json', 'r') as f:
     forward_idx = json.load(f)
 
 total_docs = len(forward_idx)
