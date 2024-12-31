@@ -5,7 +5,7 @@ import json
 
 # Define the word ID range for each barrel
 WORD_ID_RANGE = 1000
-
+BARRELS_TOTAL = 120
 # Load inverted index
 with open('inverted_index.json', 'r') as f:
     inverted_idx = json.load(f)
@@ -13,13 +13,13 @@ with open('inverted_index.json', 'r') as f:
 # Create a directory for barrels
 os.makedirs('barrels', exist_ok=True)
 
-# Group words into barrels based on word ID ranges
+# use hashing to assign coreect barrels to the docs...
 barrel_data = defaultdict(dict)
 for word_id, doc_data in inverted_idx.items():
-    # Determine which barrel this word belongs to
-    barrel_id = int(word_id) // WORD_ID_RANGE
-    barrel_data[barrel_id][word_id] = doc_data
 
+    barrel_id = int(word_id) % BARRELS_TOTAL
+    barrel_data[barrel_id][word_id] = doc_data
+    
 # Save each barrel using MessagePack
 for barrel_id, words in barrel_data.items():
     barrel_filename = f'barrels/barrel_{barrel_id}.msgpack'
