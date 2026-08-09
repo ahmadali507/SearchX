@@ -47,7 +47,6 @@ Thumbs.db
 desktop.ini
 
 # Sensitive or environment-specific configuration files
-.env
 *.secret
 
 # Byte-compiled files
@@ -104,8 +103,9 @@ Thumbs.db
 desktop.ini
 
 # Sensitive or environment-specific configuration files
-.env
 *.secret
 branch_structure.json
 temp_auto_push.bat
 temp_interactive_push.bat
+config.bat
+node_modules
